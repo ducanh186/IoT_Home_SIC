@@ -1,0 +1,96 @@
+#include <DistanceSRF04.h>
+#include <Servo.h>
+#include <SPI.h> // Cần thiết cho Ethernet/WiFi shield
+#include <Ethernet.h> // Hoặc WiFi.h nếu sử dụng WiFi shield
+#include <PubSubClient.h>
+
+// Cấu hình mạng (thay đổi nếu cần)
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; // Địa chỉ MAC (thay đổi nếu dùng nhiều Arduino)
+IPAddress server(192, 168, 1, 100); // Địa chỉ IP của Raspberry Pi (MQTT broker)
+IPAddress arduinoIP(192, 168, 1, 101); // Địa chỉ IP cho Arduino (thay đổi cho phù hợp)
+IPAddress gateway(192, 168, 1, 1); // Gateway
+IPAddress subnet(255, 255, 255, 0); // Subnet mask
+
+// Khai báo đối tượng Ethernet client
+EthernetClient ethClient;
+
+// Khai báo đối tượng MQTT client
+PubSubClient mqttClient(ethClient);
+
+DistanceSRF04 Dist;
+Servo myservo;
+
+#define GOC_DONG 0 //Đây là góc đóng của servo
+#define GOC_MO 110 //Đây là góc mở của servo
+
+int distance;
+unsigned long previousMillis = 0;
+unsigned char autoTrigger = 0;
+unsigned long autoMillis = 0;
+
+void setup() {
+  Serial.begin(9600);
+
+  // Khởi tạo Ethernet
+  Ethernet.begin(mac, arduinoIP, gateway, subnet);
+  delay(1500); // Cho Ethernet khởi tạo xong
+
+  // Cấu hình MQTT broker
+  mqttClient.setServer(server, 1883); // 1883 là cổng MQTT mặc định
+
+  // Kết nối lại MQTT (nếu bị ngắt)
+  connectMQTT();
+
+  Dist.begin(12, 13);
+  myservo.attach(11);
+  myservo.write(GOC_DONG);
+}
+
+void loop() {
+  // Duy trì kết nối MQTT
+  if (!mqttClient.connected()) {
+    connectMQTT();
+  }
+  mqttClient.loop();
+
+  if (millis() - previousMillis >= 100) {
+    previousMillis = millis();
+    distance = Dist.getDistanceCentimeter();
+    Serial.print("\nDistance in centimeters: ");
+    Serial.print(distance);
+
+    // Publish khoảng cách lên MQTT topic
+    publishDistance(distance);
+
+    if (distance < 10) {
+      autoTrigger = 1;
+      autoMillis = millis();
+      myservo.write(GOC_MO);
+    }
+  }
+
+  if (millis() - autoMillis >= 2000 && autoTrigger == 1) {
+    autoTrigger = 0;
+    myservo.write(GOC_DONG);
+  }
+}
+
+void connectMQTT() {
+  while (!mqttClient.connected()) {
+    Serial.print("Đang kết nối MQTT...");
+    String clientId = "Arduino-ThungRac-" + String(random(0xffff), HEX); // Tạo ID duy nhất
+    if (mqttClient.connect(clientId.c_str())) {
+      Serial.println("Đã kết nối MQTT");
+    } else {
+      Serial.print("Kết nối MQTT thất bại, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" Retrying in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+void publishDistance(int distanceCm) {
+  String message = String(distanceCm);
+  mqttClient.publish("thungrac/distance", message.c_str()); // "thungrac/distance" là topic
+}
