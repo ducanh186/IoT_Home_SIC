@@ -1,0 +1,36 @@
+import paho.mqtt.client as mqtt
+
+# Cấu hình MQTT broker
+mqtt_server = "192.168.1.100"  # Địa chỉ IP của Raspberry Pi (MQTT broker)
+mqtt_port = 1883
+mqtt_topic = "thungrac/distance" # Topic để subscribe
+
+# Hàm xử lý khi kết nối thành công
+def on_connect(client, userdata, flags, rc):
+    print("Đã kết nối với MQTT Broker với kết quả mã: " + str(rc))
+    client.subscribe(mqtt_topic) # Subscribe vào topic
+
+# Hàm xử lý khi nhận được tin nhắn
+def on_message(client, userdata, msg):
+    try:
+        distance = float(msg.payload.decode()) # Giải mã payload và chuyển thành số
+        print(f"Khoảng cách nhận được: {distance} cm")
+
+        # Xử lý dữ liệu ở đây (ví dụ: lưu vào cơ sở dữ liệu, hiển thị trên dashboard, gửi thông báo)
+        # Ví dụ đơn giản: In ra màn hình
+        if distance < 10:
+            print("Thùng rác gần đầy!")
+
+    except ValueError:
+        print("Dữ liệu nhận được không hợp lệ")
+
+# Tạo MQTT client
+client = mqtt.Client()
+client.on_connect = on_connect
+client.on_message = on_message
+
+# Kết nối đến MQTT broker
+client.connect(mqtt_server, mqtt_port, 60)
+
+# Vòng lặp để duy trì kết nối và xử lý tin nhắn
+client.loop_forever()
