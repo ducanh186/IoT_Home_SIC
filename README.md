@@ -1,6 +1,8 @@
 
 # ESP32 Safety Monitoring System
 
+![System Overview](image/normal.png)
+
 ## Overview
 This project is an IoT safety monitoring system using ESP32 NodeMCU and Raspberry Pi 5. It provides real-time monitoring and alerts for temperature, humidity, gas levels, and fire detection, with MQTT communication to a central Raspberry Pi server.
 
@@ -23,13 +25,35 @@ This project is an IoT safety monitoring system using ESP32 NodeMCU and Raspberr
 - MQTT communication to Raspberry Pi 5
 - Auto WiFi reconnection & error handling
 
+## Visual Status Indicators
+
+The system provides clear visual feedback through different LED states:
+
+| Status | LED Indicator | Visual Example |
+|--------|---------------|----------------|
+| Normal/Safe | Green LED | ![Normal](image/normal.png) |
+| Gas Warning/Danger | Yellow/Red LED + Buzzer | ![Gas Alert](image/gas.png) |
+| Fire Detected | All LEDs Flash + Buzzer | ![Fire Alert](image/fire.png) |
+
 ## System Logic
-- **Gas Levels**:
-  - SAFE: Green LED ON
-  - WARNING: Yellow LED ON + Buzzer
-  - DANGER: Red LED ON + Buzzer
-- **Fire Detection**:
-  - Fire detected: All LEDs flash + Buzzer alert
+
+### Normal Operation (Safe Environment)
+![Normal State](image/normal.png)
+- **Gas Levels - SAFE**: Green LED ON
+- Temperature and humidity monitoring active
+- No alerts triggered
+
+### Gas Detection Alert
+![Gas Alert](image/gas.png)
+- **WARNING**: Yellow LED ON + Buzzer
+- **DANGER**: Red LED ON + Buzzer
+- Gas concentration exceeds safe thresholds
+
+### Fire Detection Emergency
+![Fire Alert](image/fire.png)
+- **Fire Detected**: All LEDs flash + Buzzer alert
+- Immediate emergency response activated
+- MQTT alert sent to Raspberry Pi
 
 ## Communication Protocol
 - **WiFi**: ESP32 connects to local WiFi
@@ -65,6 +89,3 @@ This project is an IoT safety monitoring system using ESP32 NodeMCU and Raspberr
 
 ## License
 MIT
-- [ ] Set up Raspberry Pi 5 as central hub with MQTT broker
-
-- [ ] Configure ESP32 nodes with MQTT client
