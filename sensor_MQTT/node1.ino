@@ -1,189 +1,261 @@
 /* 
- * NODE 1 - Environmental & Fire Safety Monitoring System
+ * ESP32 SAFETY MONITORING SYSTEM - REWRITTEN LOGIC
  * ESP32 NodeMCU + Raspberry Pi 5
  * 
- * Features:
- * - Temperature & Humidity monitoring using DHT11 sensor (IMPLEMENTED)
- * - Gas detection using MQ sensor with 3-level warning system (IMPLEMENTED)
- * - Fire detection using flame sensor (IMPLEMENTED)
- * - LED indicator system: Green/Yellow/Red for gas levels (IMPLEMENTED)
- * - Buzzer alert system for fire and gas warnings (IMPLEMENTED)
- * - Real-time data transmission via MQTT to Raspberry Pi 5
- * - WiFi connectivity with auto-reconnection
- * - Robust error handling and sensor validation
+ * MAIN FEATURES:
+ * ✅ Temperature & Humidity monitoring (DHT11)
+ * ✅ 3-level Gas detection with LED indicators (SAFE/WARNING/DANGER)
+ * ✅ Fire detection with immediate alert
+ * ✅ PWM-controlled buzzer for fire/gas alerts
+ * ✅ MQTT communication to Raspberry Pi 5
+ * ✅ Auto WiFi reconnection & error handling
  * 
- * Hardware: ESP32 NodeMCU
- * Pin Configuration:
- * - DHT11: GPIO 4
- * - MQ Gas Sensor: GPIO 34 (ADC1_CH6)
- * - Flame Sensor: GPIO 2
- * - Green LED: GPIO 18
- * - Yellow LED: GPIO 19
- * - Red LED: GPIO 21
- * - Buzzer: GPIO 5
+ * HARDWARE CONFIGURATION:
+ * - DHT11: GPIO 4 (Temperature & Humidity)
+ * - MQ Gas Sensor: GPIO 34 (Analog) + GPIO 35 (Digital)
+ * - Flame Sensor: GPIO 26 (Digital fire detection)
+ * - Green LED: GPIO 18 (Gas SAFE)
+ * - Yellow LED: GPIO 19 (Gas WARNING) 
+ * - Red LED: GPIO 21 (Gas DANGER)
+ * - Buzzer: GPIO 5 (PWM controlled)
+ * 
+ * GAS LEVELS & LED LOGIC:
+ * - SAFE (0-1500): Green LED ON
+ * - WARNING (1500-1900): Yellow LED ON + Buzzer PWM
+ * - DANGER (1900+): Red LED ON + Buzzer PWM
+ * 
+ * FIRE DETECTION:
+ * - Fire detected: All LEDs flash + Buzzer PWM alert
  */
 
 #include "DHT.h"
 #include "PubSubClient.h"
 #include "WiFi.h"
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
 
-// Initialize LCD with I2C address 0x27 and 16x2 size
-LiquidCrystal_I2C lcd(0x27, 16, 2);
-
-// ===== SECTION 1: CONFIGURATION AND DECLARATIONS =====
-// DHT Sensor Configuration
-#define DHTPIN 4 
-#define DHTTYPE DHT11 
+// ===== HARDWARE CONFIGURATION =====
+#define DHTPIN 4                 // DHT11 data pin
+#define DHTTYPE DHT11            // DHT sensor type
 DHT dht(DHTPIN, DHTTYPE);
 
-// MQ Gas Sensor Configuration (2 pins: Analog + Digital)
-#define MQ_ANALOG_PIN 34         // GPIO 34 (ADC1_CH6) - Analog reading
+// MQ Gas Sensor Configuration
+#define MQ_ANALOG_PIN 34         // GPIO 34 (ADC) - Analog gas reading
 #define MQ_DIGITAL_PIN 35        // GPIO 35 - Digital threshold detection
-#define GAS_THRESHOLD_LOW 1000   // Analog: Safe level (0-4095 range)
-#define GAS_THRESHOLD_MED 2000   // Analog: Warning level  
-#define GAS_THRESHOLD_HIGH 3000  // Analog: Danger level
+#define GAS_SAFE_THRESHOLD 1400  // Analog value: SAFE level (0-1400)
+#define GAS_WARNING_THRESHOLD 1600 // Analog value: WARNING level (1400-1600)
+// Above 1900 = DANGER level
 
-// Fire Sensor Configuration
-#define FIRE_SENSOR_PIN 2        // GPIO 2 - Digital flame detection
+// Fire Sensor Configuration  
+#define FIRE_SENSOR_PIN 26       // GPIO 26 - Digital fire detection
 
-// LED Configuration - ESP32 NodeMCU pins
-#define GREEN_LED_PIN 18         // GPIO 18 - Safe status
-#define YELLOW_LED_PIN 19        // GPIO 19 - Warning status
-#define RED_LED_PIN 21           // GPIO 21 - Danger status
+// LED Status Indicators
+#define GREEN_LED_PIN 18         // GPIO 18 - Gas SAFE status
+#define YELLOW_LED_PIN 19        // GPIO 19 - Gas WARNING status  
+#define RED_LED_PIN 21           // GPIO 21 - Gas DANGER status
 
-// Active Buzzer Configuration (3-pin: VCC, GND, Signal)
-#define BUZZER_SIGNAL_PIN 5      // GPIO 5 - Signal control pin
+// PWM Buzzer Configuration
+#define BUZZER_PIN 5             // GPIO 5 - PWM buzzer control
+#define BUZZER_CHANNEL 0         // PWM channel for buzzer
+#define BUZZER_FREQUENCY 2000    // PWM frequency (2kHz)
+#define BUZZER_RESOLUTION 8      // PWM resolution (8-bit: 0-255)
 
 // WiFi Configuration
 const char* ssid = "VIETTEL";                
 const char* wifi_password = "12345678";
 
 // MQTT Configuration
-const char* mqtt_server = "192.168.1.3"; // IP address of Raspberry Pi 5
-const char* humidity_topic = "humidity"; // MQTT topic for humidity data
-const char* temperature_topic = "temperature"; // MQTT topic for temperature data
-const char* gas_analog_topic = "gas_analog"; // MQTT topic for MQ analog reading
-const char* gas_digital_topic = "gas_digital"; // MQTT topic for MQ digital state
-const char* gas_status_topic = "gas_status"; // MQTT topic for gas status (SAFE/WARNING/DANGER)
-const char* fire_topic = "fire_detected"; // MQTT topic for fire detection
-const char* mqtt_username = "pi101"; // MQTT username
-const char* mqtt_password = "1234"; // MQTT password
-const char* clientID = "ESP32_Safety_Monitor"; // MQTT client ID
+const char* mqtt_server = "192.168.1.3";
+const char* mqtt_username = "pi101";
+const char* mqtt_password = "1234";
+const char* clientID = "ESP32_Safety_Monitor";
 
-// Initialize WiFi and MQTT objects
+// MQTT Topics
+const char* temperature_topic = "temperature";
+const char* humidity_topic = "humidity";
+const char* gas_analog_topic = "gas_analog";
+const char* gas_digital_topic = "gas_digital";
+const char* gas_status_topic = "gas_status";
+const char* fire_topic = "fire_detected";
+
+// WiFi and MQTT objects
 WiFiClient wifiClient;
 PubSubClient client(mqtt_server, 1883, wifiClient);
 
-// Sensor data structure
-struct SensorData {
-  float temperature;
-  float humidity;
-  int gasAnalog;           // MQ analog reading (0-4095)
-  bool gasDigital;         // MQ digital threshold detection
-  String gasStatus;        // SAFE, WARNING, DANGER
-  bool fireDetected;       // Flame sensor status
-  bool isValid;
-};
-
 // Gas level enumeration
 enum GasLevel {
-  GAS_SAFE,
-  GAS_WARNING, 
-  GAS_DANGER
+  GAS_SAFE,     // 0-1400: Green LED
+  GAS_WARNING,  // 1400-1600: Yellow LED + Buzzer
+  GAS_DANGER    // 1600+: Red LED + Buzzer
 };
 
-// ===== SECTION 2: SENSOR CONTROL LOGIC =====
+// System data structure
+struct SystemData {
+  float temperature;
+  float humidity;
+  int gasAnalogValue;      // 0-4095 ADC reading
+  bool gasDigitalTriggered; // Digital threshold status
+  GasLevel gasLevel;       // Current gas safety level
+  bool fireDetected;       // Fire sensor status
+  bool isDataValid;        // Sensor reading validity
+};
 
-// Initialize all sensors and hardware for ESP32
-void initSensor() {
-  // Initialize DHT sensor
-  dht.begin();
-  Serial.println("DHT11 sensor initialized on GPIO 4");
+// ===== SYSTEM INITIALIZATION =====
+void setup() {
+  Serial.begin(115200);
+  Serial.println("🚀 ESP32 Safety Monitoring System Starting...");
   
-  // Initialize MQ gas sensor pins (ESP32 ADC + Digital)
+  // Initialize hardware components
+  initializeHardware();
+  
+  // Connect to WiFi
+  if (!connectToWiFi()) {
+    Serial.println("❌ Cannot proceed without WiFi connection");
+    while(1) delay(1000); // Halt system
+  }
+  
+  // Connect to MQTT broker
+  if (!connectToMQTT()) {
+    Serial.println("⚠️ Initial MQTT connection failed. Will retry in main loop.");
+  }
+  
+  Serial.println("✅ System initialization complete!");
+  Serial.println("📊 Starting sensor monitoring...\n");
+}
+
+// ===== MAIN PROGRAM LOOP =====
+void loop() {
+  // Ensure connections are active
+  maintainConnections();
+  
+  // Read all sensor data
+  SystemData systemData = readAllSensors();
+  
+  // Control hardware based on readings
+  controlLEDIndicators(systemData.gasLevel);
+  controlPWMBuzzer(systemData.fireDetected, systemData.gasLevel);
+  
+  // Display readings on Serial Monitor
+  displaySensorReadings(systemData);
+  
+  // Send data via MQTT
+  if (systemData.isDataValid) {
+    sendDataToMQTT(systemData);
+  }
+  
+  // Wait before next reading
+  delay(2000);
+}
+// ===== HARDWARE INITIALIZATION =====
+void initializeHardware() {
+  Serial.println("🔧 Initializing hardware components...");
+  
+  // Initialize DHT11 temperature & humidity sensor
+  dht.begin();
+  Serial.println("  ✅ DHT11 sensor (GPIO 4) - Temperature & Humidity");
+  
+  // Initialize MQ gas sensor pins
   pinMode(MQ_ANALOG_PIN, INPUT);
   pinMode(MQ_DIGITAL_PIN, INPUT);
-  Serial.println("MQ Gas sensor initialized:");
-  Serial.println("  - Analog: GPIO 34 (ADC)");
-  Serial.println("  - Digital: GPIO 35");
+  Serial.println("  ✅ MQ Gas sensor - Analog (GPIO 34) + Digital (GPIO 35)");
   
-  // Initialize fire sensor pin
+  // Initialize fire sensor
   pinMode(FIRE_SENSOR_PIN, INPUT);
-  Serial.println("Flame sensor initialized on GPIO 2");
+  Serial.println("  ✅ Flame sensor (GPIO 26) - Fire detection");
   
-  // Initialize LED pins
+  // Initialize LED indicator pins
   pinMode(GREEN_LED_PIN, OUTPUT);
   pinMode(YELLOW_LED_PIN, OUTPUT);
   pinMode(RED_LED_PIN, OUTPUT);
-  Serial.println("LED indicators initialized (GPIO 18,19,21)");
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(YELLOW_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
+  Serial.println("  ✅ LED indicators (GPIO 18,19,21) - Status display");
   
-  // Initialize active buzzer signal pin
-  pinMode(BUZZER_SIGNAL_PIN, OUTPUT);
-  digitalWrite(BUZZER_SIGNAL_PIN, LOW); // Ensure buzzer is off initially
-  Serial.println("Active buzzer initialized on GPIO 5");
+  // Initialize PWM buzzer (compatible with ESP32 Core 2.x and 3.x)
+  pinMode(BUZZER_PIN, OUTPUT);
   
-  // Test LEDs at startup
-  testLEDs();
-  Serial.println("ESP32 NodeMCU initialization complete!");
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+    // ESP32 Arduino Core 3.0+ syntax
+    ledcAttach(BUZZER_PIN, BUZZER_FREQUENCY, BUZZER_RESOLUTION);
+    ledcWrite(BUZZER_PIN, 0); // Ensure buzzer is off
+  #else
+    // ESP32 Arduino Core 2.x syntax
+    ledcSetup(BUZZER_CHANNEL, BUZZER_FREQUENCY, BUZZER_RESOLUTION);
+    ledcAttachPin(BUZZER_PIN, BUZZER_CHANNEL);
+    ledcWrite(BUZZER_CHANNEL, 0); // Ensure buzzer is off
+  #endif
+  
+  Serial.println("  ✅ PWM Buzzer (GPIO 5) - Audio alerts");
+  
+  // Test all LEDs
+  testSystemLEDs();
+  Serial.println("🔧 Hardware initialization complete!");
 }
 
 // Test LED functionality at startup
-void testLEDs() {
-  Serial.println("Testing ESP32 LEDs...");
+void testSystemLEDs() {
+  Serial.println("  🔍 Testing LED system...");
+  
+  // Test each LED for 200ms
   digitalWrite(GREEN_LED_PIN, HIGH);
-  delay(300);
+  delay(200);
   digitalWrite(GREEN_LED_PIN, LOW);
+  
   digitalWrite(YELLOW_LED_PIN, HIGH);
-  delay(300);
+  delay(200);
   digitalWrite(YELLOW_LED_PIN, LOW);
+  
   digitalWrite(RED_LED_PIN, HIGH);
-  delay(300);
+  delay(200);
   digitalWrite(RED_LED_PIN, LOW);
-  Serial.println("LED test completed");
+  
+  Serial.println("  ✅ LED test completed");
 }
 
-// Read MQ gas sensor (both analog and digital) - tham khảo logic từ code mẫu
-GasLevel readGasLevel(int* gasAnalog, bool* gasDigital) {
-  // Đọc giá trị analog (0-4095)
-  *gasAnalog = analogRead(MQ_ANALOG_PIN);
+// ===== SENSOR READING FUNCTIONS =====
+SystemData readAllSensors() {
+  SystemData data;
   
-  // Đọc giá trị digital (tương tự MQ21_getValue trong code mẫu)
-  uint8_t digitalValue = digitalRead(MQ_DIGITAL_PIN);
-  *gasDigital = (digitalValue == LOW) ? true : false; // LOW = gas detected
+  // Read temperature and humidity from DHT11
+  data.temperature = dht.readTemperature();
+  data.humidity = dht.readHumidity();
   
-  // Xác định mức độ gas dựa trên giá trị analog
-  if (*gasAnalog < GAS_THRESHOLD_LOW) {
-    return GAS_SAFE;
-  } else if (*gasAnalog < GAS_THRESHOLD_MED) {
-    return GAS_WARNING;
-  } else {
-    return GAS_DANGER;
+  // Validate DHT readings
+  if (isnan(data.temperature) || isnan(data.humidity)) {
+    data.isDataValid = false;
+    Serial.println("❌ DHT11 sensor reading failed!");
+    return data;
   }
-}
-
-// Read fire sensor - tham khảo logic flame_getValue từ code mẫu
-bool readFireSensor() {
-  int flame_state = digitalRead(FIRE_SENSOR_PIN);
   
-  // Logic tương tự flame1_getValue trong code mẫu
-  if (flame_state == HIGH) {
-    return false; // Không có lửa
+  // Read MQ gas sensor (analog + digital)
+  data.gasAnalogValue = analogRead(MQ_ANALOG_PIN);
+  data.gasDigitalTriggered = (digitalRead(MQ_DIGITAL_PIN) == LOW);
+  
+  // Determine gas safety level based on analog reading
+  if (data.gasAnalogValue < GAS_SAFE_THRESHOLD) {
+    data.gasLevel = GAS_SAFE;
+  } else if (data.gasAnalogValue < GAS_WARNING_THRESHOLD) {
+    data.gasLevel = GAS_WARNING;
   } else {
-    return true;  // Phát hiện lửa
+    data.gasLevel = GAS_DANGER;
   }
+  
+  // Read fire sensor (digital)
+  data.fireDetected = (digitalRead(FIRE_SENSOR_PIN) == HIGH);
+  
+  data.isDataValid = true;
+  return data;
 }
 
-// Control LEDs based on gas level
-void controlLEDs(GasLevel level) {
+// ===== LED CONTROL LOGIC =====
+void controlLEDIndicators(GasLevel gasLevel) {
   // Turn off all LEDs first
   digitalWrite(GREEN_LED_PIN, LOW);
   digitalWrite(YELLOW_LED_PIN, LOW);
   digitalWrite(RED_LED_PIN, LOW);
   
-  // Turn on appropriate LED
-  switch (level) {
+  // Turn on appropriate LED based on gas level
+  switch (gasLevel) {
     case GAS_SAFE:
       digitalWrite(GREEN_LED_PIN, HIGH);
       break;
@@ -196,132 +268,137 @@ void controlLEDs(GasLevel level) {
   }
 }
 
-// Control active buzzer - tham khảo handleBuzzer từ code mẫu
-void controlBuzzer(bool fireDetected, GasLevel gasLevel) {
-  static unsigned long lastBuzzerTime = 0;
-  static int buzzerCount = 0;
-  static bool buzzerActive = false;
+// ===== PWM BUZZER CONTROL LOGIC =====
+void controlPWMBuzzer(bool fireDetected, GasLevel gasLevel) {
+  static unsigned long lastBuzzerUpdate = 0;
+  static bool buzzerState = false;
   unsigned long currentTime = millis();
   
-  // Logic tương tự handleBuzzer trong code mẫu
+  // Fire detection: Continuous high-frequency beeping
   if (fireDetected) {
-    // Phát hiện lửa: 10 tiếng beep liên tiếp
-    if (!buzzerActive || (currentTime - lastBuzzerTime >= 500)) {
-      if (buzzerCount < 20) { // 10 lần ON/OFF = 20 states
-        digitalWrite(BUZZER_SIGNAL_PIN, (buzzerCount % 2 == 0) ? HIGH : LOW);
-        buzzerCount++;
-        lastBuzzerTime = currentTime;
-        if (buzzerCount == 1) buzzerActive = true;
+    if (currentTime - lastBuzzerUpdate >= 150) { // 150ms intervals
+      buzzerState = !buzzerState;
+      if (buzzerState) {
+        #if ESP_ARDUINO_VERSION_MAJOR >= 3
+          ledcWrite(BUZZER_PIN, 200); // ESP32 Core 3.0+ syntax - PHÁT ÂM THANH
+        #else
+          ledcWrite(BUZZER_CHANNEL, 200); // ESP32 Core 2.x syntax - PHÁT ÂM THANH
+        #endif
       } else {
-        buzzerCount = 0;
-        buzzerActive = false;
-        digitalWrite(BUZZER_SIGNAL_PIN, LOW);
+        #if ESP_ARDUINO_VERSION_MAJOR >= 3
+          ledcWrite(BUZZER_PIN, 0);   // TẮT ÂM THANH
+        #else
+          ledcWrite(BUZZER_CHANNEL, 0);   // TẮT ÂM THANH
+        #endif
       }
+      lastBuzzerUpdate = currentTime;
     }
-  } 
-  else if (gasLevel == GAS_DANGER || gasLevel == GAS_WARNING) {
-    // Phát hiện gas: 10 tiếng beep liên tiếp tương tự fire
-    if (!buzzerActive || (currentTime - lastBuzzerTime >= 500)) {
-      if (buzzerCount < 20) { // 10 lần ON/OFF
-        digitalWrite(BUZZER_SIGNAL_PIN, (buzzerCount % 2 == 0) ? HIGH : LOW);
-        buzzerCount++;
-        lastBuzzerTime = currentTime;
-        if (buzzerCount == 1) buzzerActive = true;
+  }
+  // Gas warning/danger: Slower beeping pattern
+  else if (gasLevel == GAS_WARNING || gasLevel == GAS_DANGER) {
+    unsigned int beepInterval = (gasLevel == GAS_DANGER) ? 500 : 1000; // Faster for danger
+    unsigned int pwmIntensity = (gasLevel == GAS_DANGER) ? 180 : 120;   // Louder for danger
+    
+    if (currentTime - lastBuzzerUpdate >= beepInterval) {
+      buzzerState = !buzzerState;
+      if (buzzerState) {
+        #if ESP_ARDUINO_VERSION_MAJOR >= 3
+          ledcWrite(BUZZER_PIN, pwmIntensity); // PHÁT ÂM THANH VỚI CƯỜNG ĐỘ KHÁC NHAU
+        #else
+          ledcWrite(BUZZER_CHANNEL, pwmIntensity); // PHÁT ÂM THANH VỚI CƯỜNG ĐỘ KHÁC NHAU
+        #endif
       } else {
-        buzzerCount = 0;
-        buzzerActive = false;
-        digitalWrite(BUZZER_SIGNAL_PIN, LOW);
+        #if ESP_ARDUINO_VERSION_MAJOR >= 3
+          ledcWrite(BUZZER_PIN, 0); // TẮT ÂM THANH
+        #else
+          ledcWrite(BUZZER_CHANNEL, 0); // TẮT ÂM THANH
+        #endif
       }
+      lastBuzzerUpdate = currentTime;
     }
-  } 
+  }
+  // Safe condition: Turn off buzzer
   else {
-    // An toàn: Tắt buzzer
-    digitalWrite(BUZZER_SIGNAL_PIN, LOW);
-    buzzerCount = 0;
-    buzzerActive = false;
+    #if ESP_ARDUINO_VERSION_MAJOR >= 3
+      ledcWrite(BUZZER_PIN, 0); // TẮT BUZZER KHI AN TOÀN
+    #else
+      ledcWrite(BUZZER_CHANNEL, 0); // TẮT BUZZER KHI AN TOÀN
+    #endif
+    buzzerState = false;
   }
 }
 
-// Convert gas level to string
+// ===== DISPLAY & MONITORING =====
+void displaySensorReadings(const SystemData& data) {
+  if (!data.isDataValid) {
+    Serial.println("❌ Invalid sensor data - Skipping display");
+    return;
+  }
+  
+  Serial.println("╔═══════════════════════════════════════════════════════╗");
+  Serial.println("║            🏠 ESP32 SAFETY MONITORING SYSTEM          ║");
+  Serial.println("╠═══════════════════════════════════════════════════════╣");
+  
+  // Temperature & Humidity
+  Serial.printf("║ 🌡️  Temperature: %6.1f°C                            ║\n", data.temperature);
+  Serial.printf("║ 💧 Humidity:    %6.1f%%                             ║\n", data.humidity);
+  
+  // Gas sensor readings
+  Serial.printf("║ 💨 Gas Analog:  %4d/4095                           ║\n", data.gasAnalogValue);
+  Serial.printf("║ 🔘 Gas Digital: %-9s                           ║\n", 
+                data.gasDigitalTriggered ? "TRIGGERED" : "NORMAL");
+  
+  // Gas safety level with visual indicators
+  const char* gasStatusText;
+  const char* gasIcon;
+  switch (data.gasLevel) {
+    case GAS_SAFE:
+      gasStatusText = "SAFE";
+      gasIcon = "🟢";
+      break;
+    case GAS_WARNING:
+      gasStatusText = "WARNING";
+      gasIcon = "🟡";
+      break;
+    case GAS_DANGER:
+      gasStatusText = "DANGER";
+      gasIcon = "🔴";
+      break;
+  }
+  Serial.printf("║ %s Gas Level:   %-9s                          ║\n", gasIcon, gasStatusText);
+  
+  // Fire detection
+  Serial.printf("║ 🔥 Fire Status: %-9s                           ║\n", 
+                data.fireDetected ? "DETECTED" : "NO FIRE");
+  
+  // Alert status
+  if (data.fireDetected) {
+    Serial.println("║ 🚨🔥 FIRE EMERGENCY - IMMEDIATE ACTION REQUIRED! 🔥🚨 ║");
+  } else if (data.gasLevel == GAS_DANGER) {
+    Serial.println("║ ⚠️🚨  GAS DANGER ALERT - EVACUATE AREA!  🚨⚠️       ║");
+  } else if (data.gasLevel == GAS_WARNING) {
+    Serial.println("║ ⚠️⚠️  GAS WARNING - CHECK VENTILATION  ⚠️⚠️        ║");
+  } else {
+    Serial.println("║ ✅✅ All systems normal - Environment safe ✅✅     ║");
+  }
+  
+  Serial.println("╚═══════════════════════════════════════════════════════╝");
+  Serial.println();
+}
+
+// Convert gas level to string for MQTT
 String gasLevelToString(GasLevel level) {
   switch (level) {
     case GAS_SAFE: return "SAFE";
-    case GAS_WARNING: return "WARNING";
+    case GAS_WARNING: return "WARNING"; 
     case GAS_DANGER: return "DANGER";
     default: return "UNKNOWN";
   }
 }
 
-// Read data from all sensors
-SensorData readSensorData() {
-  SensorData data;
-  
-  // Read temperature and humidity
-  data.temperature = dht.readTemperature();
-  data.humidity = dht.readHumidity();
-  
-  // Read MQ gas sensor (both analog and digital)
-  int gasAnalog;
-  bool gasDigital;
-  GasLevel gasLevel = readGasLevel(&gasAnalog, &gasDigital);
-  data.gasAnalog = gasAnalog;
-  data.gasDigital = gasDigital;
-  data.gasStatus = gasLevelToString(gasLevel);
-  
-  // Read fire sensor
-  data.fireDetected = readFireSensor();
-  
-  // Check if readings are valid
-  if (isnan(data.temperature) || isnan(data.humidity)) {
-    data.isValid = false;
-    Serial.println("Failed to read from DHT sensor!");
-  } else {
-    data.isValid = true;
-  }
-  
-  // Control hardware based on sensor readings
-  controlLEDs(gasLevel);
-  controlBuzzer(data.fireDetected, gasLevel);
-  
-  return data;
-}
-
-// Display sensor data on Serial Monitor - thêm debug gas digital như code mẫu
-void displaySensorData(const SensorData& data) {
-  if (data.isValid) {
-    Serial.println("===== ESP32 SENSOR READINGS =====");
-    Serial.print("Temperature: ");
-    Serial.print(data.temperature);
-    Serial.println(" *C");
-    Serial.print("Humidity: ");
-    Serial.print(data.humidity);
-    Serial.println(" %");
-    Serial.print("Gas Analog: ");
-    Serial.print(data.gasAnalog);
-    Serial.print("/4095 (Status: ");
-    Serial.print(data.gasStatus);
-    Serial.println(")");
-    Serial.print("Gas Digital: ");
-    Serial.println(data.gasDigital ? "TRIGGERED" : "NORMAL");
-    Serial.print("Fire Detected: ");
-    Serial.println(data.fireDetected ? "YES" : "NO");
-    
-    // Debug info tương tự code mẫu
-    Serial.print("Debug - Gas Digital Raw: ");
-    Serial.print(data.gasDigital);
-    Serial.print(", Fire Raw: ");
-    Serial.println(data.fireDetected);
-    Serial.println("=================================");
-  } else {
-    Serial.println("Invalid sensor data");
-  }
-}
-
-// ===== SECTION 3: WIFI CONNECTION MANAGEMENT =====
-
-// Connect to WiFi network
-bool connectWiFi() {
-  Serial.print("Connecting to ");
+// ===== WIFI CONNECTION MANAGEMENT =====
+bool connectToWiFi() {
+  Serial.print("📡 Connecting to WiFi network: ");
   Serial.println(ssid);
   
   WiFi.begin(ssid, wifi_password);
@@ -334,174 +411,112 @@ bool connectWiFi() {
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected successfully");
-    Serial.print("IP address: ");
+    Serial.println();
+    Serial.println("✅ WiFi connected successfully!");
+    Serial.print("📍 IP Address: ");
     Serial.println(WiFi.localIP());
     return true;
   } else {
-    Serial.println("\nWiFi connection failed");
+    Serial.println();
+    Serial.println("❌ WiFi connection failed!");
     return false;
   }
 }
 
-// Check WiFi connection status
 bool isWiFiConnected() {
   return WiFi.status() == WL_CONNECTED;
 }
 
-// ===== SECTION 4: MQTT COMMUNICATION MODULE =====
-
-// Connect to MQTT broker
-bool connectMQTT() {
+// ===== MQTT COMMUNICATION =====
+bool connectToMQTT() {
   if (!isWiFiConnected()) {
-    Serial.println("WiFi not connected. Cannot connect to MQTT.");
+    Serial.println("❌ WiFi not connected. Cannot connect to MQTT.");
     return false;
   }
   
+  Serial.print("📡 Connecting to MQTT broker: ");
+  Serial.println(mqtt_server);
+  
   if (client.connect(clientID, mqtt_username, mqtt_password)) {
-    Serial.println("Connected to MQTT Broker successfully!");
+    Serial.println("✅ Connected to MQTT broker successfully!");
     return true;
   } else {
-    Serial.print("MQTT connection failed, rc=");
+    Serial.print("❌ MQTT connection failed, error code: ");
     Serial.println(client.state());
     return false;
   }
 }
 
-// Check MQTT connection status
 bool isMQTTConnected() {
   return client.connected();
 }
 
-// Publish data to MQTT topic with improved error handling
-bool publishToMQTT(const char* topic, const String& payload) {
-  // Ensure MQTT connection is active before publishing
-  if (!isMQTTConnected()) {
-    Serial.println("MQTT not connected during publish attempt");
-    return false;
+// Maintain WiFi and MQTT connections
+void maintainConnections() {
+  // Check and reconnect WiFi if needed
+  if (!isWiFiConnected()) {
+    Serial.println("⚠️ WiFi disconnected. Reconnecting...");
+    if (!connectToWiFi()) {
+      Serial.println("❌ WiFi reconnection failed. Retrying in next loop...");
+      delay(5000);
+      return;
+    }
   }
   
-  if (client.publish(topic, payload.c_str())) {
-    Serial.print("Data sent to topic '");
-    Serial.print(topic);
-    Serial.print("': ");
-    Serial.println(payload);
-    return true;
-  } else {
-    Serial.print("Failed to send data to topic: ");
-    Serial.println(topic);
-    return false;
+  // Check and reconnect MQTT if needed
+  if (!isMQTTConnected()) {
+    Serial.println("⚠️ MQTT disconnected. Reconnecting...");
+    if (!connectToMQTT()) {
+      Serial.println("❌ MQTT reconnection failed. Retrying in next loop...");
+      delay(5000);
+      return;
+    }
   }
+  
+  // Maintain MQTT connection
+  client.loop();
 }
 
 // Send sensor data via MQTT
-void sendSensorDataMQTT(const SensorData& data) {
-  if (!data.isValid) {
-    Serial.println("Cannot send invalid sensor data");
+void sendDataToMQTT(const SystemData& data) {
+  if (!isMQTTConnected()) {
+    Serial.println("❌ MQTT not connected. Cannot send data.");
     return;
   }
   
-  // Send temperature data
-  String tempPayload = String(data.temperature);
-  if (!publishToMQTT(temperature_topic, tempPayload)) {
-    Serial.println("Failed to publish temperature data");
+  // Send temperature
+  String tempStr = String(data.temperature, 1);
+  if (client.publish(temperature_topic, tempStr.c_str())) {
+    Serial.printf("📤 Sent temperature: %s°C\n", tempStr.c_str());
   }
   
-  // Send humidity data
-  String humPayload = String(data.humidity);
-  if (!publishToMQTT(humidity_topic, humPayload)) {
-    Serial.println("Failed to publish humidity data");
+  // Send humidity
+  String humStr = String(data.humidity, 1);
+  if (client.publish(humidity_topic, humStr.c_str())) {
+    Serial.printf("📤 Sent humidity: %s%%\n", humStr.c_str());
   }
   
-  // Send gas analog reading
-  String gasAnalogPayload = String(data.gasAnalog);
-  if (!publishToMQTT(gas_analog_topic, gasAnalogPayload)) {
-    Serial.println("Failed to publish gas analog data");
+  // Send gas analog value
+  String gasAnalogStr = String(data.gasAnalogValue);
+  if (client.publish(gas_analog_topic, gasAnalogStr.c_str())) {
+    Serial.printf("📤 Sent gas analog: %s\n", gasAnalogStr.c_str());
   }
   
-  // Send gas digital state
-  String gasDigitalPayload = data.gasDigital ? "TRIGGERED" : "NORMAL";
-  if (!publishToMQTT(gas_digital_topic, gasDigitalPayload)) {
-    Serial.println("Failed to publish gas digital data");
+  // Send gas digital status
+  String gasDigitalStr = data.gasDigitalTriggered ? "TRIGGERED" : "NORMAL";
+  if (client.publish(gas_digital_topic, gasDigitalStr.c_str())) {
+    Serial.printf("📤 Sent gas digital: %s\n", gasDigitalStr.c_str());
   }
   
-  // Send gas status data
-  if (!publishToMQTT(gas_status_topic, data.gasStatus)) {
-    Serial.println("Failed to publish gas status data");
+  // Send gas safety level
+  String gasStatusStr = gasLevelToString(data.gasLevel);
+  if (client.publish(gas_status_topic, gasStatusStr.c_str())) {
+    Serial.printf("📤 Sent gas status: %s\n", gasStatusStr.c_str());
   }
   
-  // Send fire detection data
-  String firePayload = data.fireDetected ? "FIRE_DETECTED" : "NO_FIRE";
-  if (!publishToMQTT(fire_topic, firePayload)) {
-    Serial.println("Failed to publish fire detection data");
+  // Send fire detection status
+  String fireStr = data.fireDetected ? "FIRE_DETECTED" : "NO_FIRE";
+  if (client.publish(fire_topic, fireStr.c_str())) {
+    Serial.printf("📤 Sent fire status: %s\n", fireStr.c_str());
   }
-}
-
-// Disconnect from MQTT broker
-void disconnectMQTT() {
-  if (isMQTTConnected()) {
-    client.disconnect();
-    Serial.println("Disconnected from MQTT broker");
-  }
-}
-
-// ===== SECTION 5: MAIN PROGRAM FLOW =====
-
-void setup() {
-  Serial.begin(115200);
-  
-  // Initialize sensor
-  initSensor();
-  
-  // Connect to WiFi
-  if (!connectWiFi()) {
-    Serial.println("Cannot proceed without WiFi connection");
-    while(1); // Stop execution
-  }
-  
-  // Connect to MQTT broker
-  if (!connectMQTT()) {
-    Serial.println("Initial MQTT connection failed. Will retry in main loop.");
-  }
-  
-  Serial.println("System initialized successfully");
-}
-
-void loop() {
-  // Ensure WiFi connection is active
-  if (!isWiFiConnected()) {
-    Serial.println("WiFi disconnected. Reconnecting...");
-    if (!connectWiFi()) {
-      Serial.println("WiFi reconnection failed. Retrying in 5 seconds...");
-      delay(5000);
-      return; // Skip this loop iteration
-    }
-  }
-  
-  // Ensure MQTT connection is active
-  if (!isMQTTConnected()) {
-    Serial.println("MQTT disconnected. Reconnecting...");
-    if (!connectMQTT()) {
-      Serial.println("MQTT reconnection failed. Retrying in 5 seconds...");
-      delay(5000);
-      return; // Skip this loop iteration
-    }
-  }
-  
-  // Maintain MQTT connection (process incoming messages, keepalive)
-  client.loop();
-  
-  // Read sensor data
-  SensorData sensorData = readSensorData();
-  
-  // Display data locally
-  displaySensorData(sensorData);
-  
-  // Send data via MQTT (only if valid data)
-  if (sensorData.isValid) {
-    sendSensorDataMQTT(sensorData);
-  }
-  
-  // Wait before next reading (keep connection alive)
-  delay(5000); // Wait 5 seconds before next reading
 }
