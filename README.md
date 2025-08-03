@@ -4,7 +4,7 @@
 ![System Overview](image/normal.png)
 
 ## Overview
-This project is an IoT safety monitoring system using ESP32 NodeMCU and Raspberry Pi 5. It provides real-time monitoring and alerts for temperature, humidity, gas levels, and fire detection, with MQTT communication to a central Raspberry Pi server.
+This project is an IoT safety monitoring system using ESP32 NodeMCU and Raspberry Pi 5. It provides real-time monitoring and alerts for temperature, humidity, gas levels, and fire detection,trash can control with MQTT communication to a central Raspberry Pi server.
 
 ## Hardware Components
 - **ESP32 NodeMCU**: Sensor node and controller
@@ -13,6 +13,7 @@ This project is an IoT safety monitoring system using ESP32 NodeMCU and Raspberr
   - DHT11 (Temperature & Humidity)
   - MQ Gas Sensor (Analog & Digital)
   - Flame Sensor (Fire detection)
+  - Sonic Sensor
 - **Indicators**:
   - Green, Yellow, Red LEDs (Gas status)
   - PWM Buzzer (Audio alerts)
@@ -24,6 +25,7 @@ This project is an IoT safety monitoring system using ESP32 NodeMCU and Raspberr
 - PWM-controlled buzzer for fire/gas alerts
 - MQTT communication to Raspberry Pi 5
 - Auto WiFi reconnection & error handling
+- Trash can monitoring & automatic 
 
 ## Visual Status Indicators
 
