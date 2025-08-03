@@ -1,18 +1,3 @@
-/*
- * DỰ ÁN THÙNG RÁC THÔNG MINH - CODE CHO ESP32
- * (Dựa trên khung sườn của code cảnh báo khí gas)
- *
- * MỤC TIÊU:
- * ✅ Đo khoảng cách từ cảm biến siêu âm.
- * ✅ Gửi dữ liệu khoảng cách qua MQTT.
- * ✅ Nhận lệnh từ MQTT để điều khiển động cơ servo.
- * ✅ Tự động kết nối lại WiFi và MQTT khi bị mất kết nối.
- *
- * CẤU HÌNH PHẦN CỨNG:
- * - Cảm biến siêu âm HC-SR04: Trig (GPIO 5), Echo (GPIO 18)
- * - Động cơ Servo: Dây tín hiệu (GPIO 2)
- *
- */
 
 #include "PubSubClient.h"
 #include "WiFi.h"
@@ -51,7 +36,7 @@ PubSubClient client(wifiClient);
 // ===== HÀM CALLBACK KHI NHẬN TIN NHẮN MQTT =====
 // Hàm này sẽ được gọi khi ESP32 nhận được tin nhắn từ Broker
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("➡️ Message arrived on topic: ");
+  Serial.print(" Message arrived on topic: ");
   Serial.println(topic);
 
   // Chuyển đổi payload thành chuỗi
@@ -80,7 +65,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 // ===== HÀM KẾT NỐI VÀ DUY TRÌ MQTT =====
 bool connectToMQTT() {
   if (!WiFi.isConnected()) {
-    Serial.println("❌ WiFi not connected. Cannot connect to MQTT.");
+    Serial.println(" WiFi not connected. Cannot connect to MQTT.");
     return false;
   }
   
@@ -91,13 +76,13 @@ bool connectToMQTT() {
   Serial.println(mqtt_server);
   
   if (client.connect(clientID, mqtt_username, mqtt_password)) {
-    Serial.println("✅ Connected to MQTT broker successfully!");
+    Serial.println(" Connected to MQTT broker successfully!");
     // Đăng ký (subscribe) vào topic nhận lệnh
     client.subscribe(command_topic);
-    Serial.printf("✅ Subscribed to topic: %s\n", command_topic);
+    Serial.printf(" Subscribed to topic: %s\n", command_topic);
     return true;
   } else {
-    Serial.print("❌ MQTT connection failed, error code: ");
+    Serial.print(" MQTT connection failed, error code: ");
     Serial.println(client.state());
     return false;
   }
@@ -106,16 +91,16 @@ bool connectToMQTT() {
 void maintainConnections() {
   // Đảm bảo kết nối WiFi
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️ WiFi disconnected. Reconnecting...");
+    Serial.println(" WiFi disconnected. Reconnecting...");
     WiFi.begin(ssid, wifi_password);
     delay(5000);
   }
 
   // Đảm bảo kết nối MQTT
   if (!client.connected()) {
-    Serial.println("⚠️ MQTT disconnected. Reconnecting...");
+    Serial.println(" MQTT disconnected. Reconnecting...");
     if (!connectToMQTT()) {
-      Serial.println("❌ MQTT reconnection failed. Retrying in next loop...");
+      Serial.println(" MQTT reconnection failed. Retrying in next loop...");
       delay(5000);
       return;
     }
@@ -145,7 +130,7 @@ long readDistance() {
 // ===== KHỞI TẠO HỆ THỐNG =====
 void setup() {
   Serial.begin(115200);
-  Serial.println("🚀 Smart Trash Can System Starting...");
+  Serial.println(" Smart Trash Can System Starting...");
   
   // Khởi tạo các chân GPIO
   pinMode(TRIG_PIN, OUTPUT);
@@ -154,7 +139,7 @@ void setup() {
   // Khởi tạo Servo
   trashCanServo.attach(SERVO_PIN);
   trashCanServo.write(0); // Đóng nắp khi khởi động
-  Serial.println("✅ Hardware initialized!");
+  Serial.println(" Hardware initialized!");
 
   // Kết nối WiFi
   WiFi.begin(ssid, wifi_password);
@@ -162,15 +147,15 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\n✅ WiFi connected!");
-  Serial.print("📍 IP Address: ");
+  Serial.println("\n WiFi connected!");
+  Serial.print(" IP Address: ");
   Serial.println(WiFi.localIP());
   
   // Kết nối MQTT lần đầu
   connectToMQTT();
   
-  Serial.println("✅ System initialization complete!");
-  Serial.println("📊 Starting distance monitoring...\n");
+  Serial.println(" System initialization complete!");
+  Serial.println(" Starting distance monitoring...\n");
 }
 
 // ===== VÒNG LẶP CHÍNH CỦA CHƯƠNG TRÌNH =====
@@ -182,15 +167,15 @@ void loop() {
   long distance = readDistance();
   
   if (distance > 0) { // Đảm bảo khoảng cách hợp lệ
-    Serial.printf("📏 Distance: %ld cm\n", distance);
+    Serial.printf(" Distance: %ld cm\n", distance);
     client.publish(distance_topic, String(distance).c_str());
   } else {
-    Serial.println("❌ Distance reading failed!");
+    Serial.println(" Distance reading failed!");
   }
 
   // Logic tự động mở/đóng nắp
   // Ví dụ: Nếu vật thể ở gần (dưới 20cm), tự động mở nắp
-  if (distance > 0 && distance < 20) {
+  if (distance > 0 && distance < 30) {
     trashCanServo.write(120);
     client.publish(status_topic, "Lid OPEN (Auto)");
   } else {
