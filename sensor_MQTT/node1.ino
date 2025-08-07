@@ -20,12 +20,12 @@
  * - Buzzer: GPIO 5 (PWM controlled)
  * 
  * GAS LEVELS & LED LOGIC:
- * - SAFE (0-1500): Green LED ON
- * - WARNING (1500-1900): Yellow LED ON + Buzzer PWM
- * - DANGER (1900+): Red LED ON + Buzzer PWM
+ * - SAFE (0-1400): Green LED ON
+ * - WARNING (1400-1600): Yellow LED ON + Buzzer PWM
+ * - DANGER (1600+): Red LED ON + Buzzer PWM
  * 
  * FIRE DETECTION:
- * - Fire detected: All LEDs flash + Buzzer PWM alert
+ * - Fire detected: All 3 LEDs flash continuously + Buzzer PWM alert
  */
 
 #include "DHT.h"
@@ -131,7 +131,7 @@ void loop() {
   SystemData systemData = readAllSensors();
   
   // Control hardware based on readings
-  controlLEDIndicators(systemData.gasLevel);
+  controlLEDIndicators(systemData.gasLevel, systemData.fireDetected);
   controlPWMBuzzer(systemData.fireDetected, systemData.gasLevel);
   
   // Display readings on Serial Monitor
@@ -248,27 +248,64 @@ SystemData readAllSensors() {
 }
 
 // ===== LED CONTROL LOGIC =====
-void controlLEDIndicators(GasLevel gasLevel) {
-  // Turn off all LEDs first
-  digitalWrite(GREEN_LED_PIN, LOW);
-  digitalWrite(YELLOW_LED_PIN, LOW);
-  digitalWrite(RED_LED_PIN, LOW);
+void controlLEDIndicators(GasLevel gasLevel, bool fireDetected) {
+  static unsigned long lastLEDFlash = 0;
+  static bool ledFlashState = false;
+  unsigned long currentTime = millis();
   
-  // Turn on appropriate LED based on gas level
-  switch (gasLevel) {
-    case GAS_SAFE:
-      digitalWrite(GREEN_LED_PIN, HIGH);
-      break;
-    case GAS_WARNING:
-      digitalWrite(YELLOW_LED_PIN, HIGH);
-      break;
-    case GAS_DANGER:
-      digitalWrite(RED_LED_PIN, HIGH);
-      break;
+  // Fire detection: All LEDs flash continuously
+  if (fireDetected) {
+    if (currentTime - lastLEDFlash >= 200) { // Flash every 200ms
+      ledFlashState = !ledFlashState;
+      
+      // All LEDs flash together
+      digitalWrite(GREEN_LED_PIN, ledFlashState ? HIGH : LOW);
+      digitalWrite(YELLOW_LED_PIN, ledFlashState ? HIGH : LOW);
+      digitalWrite(RED_LED_PIN, ledFlashState ? HIGH : LOW);
+      
+      lastLEDFlash = currentTime;
+    }
+  }
+  // Normal gas level indication (no fire)
+  else {
+    // Turn off all LEDs first
+    digitalWrite(GREEN_LED_PIN, LOW);
+    digitalWrite(YELLOW_LED_PIN, LOW);
+    digitalWrite(RED_LED_PIN, LOW);
+    
+    // Turn on appropriate LED based on gas level
+    switch (gasLevel) {
+      case GAS_SAFE:
+        digitalWrite(GREEN_LED_PIN, HIGH);
+        break;
+      case GAS_WARNING:
+        digitalWrite(YELLOW_LED_PIN, HIGH);
+        break;
+      case GAS_DANGER:
+        digitalWrite(RED_LED_PIN, HIGH);
+        break;
+    }
   }
 }
 
 // ===== PWM BUZZER CONTROL LOGIC =====
+// Buzzer tone patterns for different alert types
+void playBuzzerTone(int intensity, bool enable) {
+  if (enable) {
+    #if ESP_ARDUINO_VERSION_MAJOR >= 3
+      ledcWrite(BUZZER_PIN, intensity); // ESP32 Core 3.0+ - PHÁT ÂM THANH
+    #else
+      ledcWrite(BUZZER_CHANNEL, intensity); // ESP32 Core 2.x - PHÁT ÂM THANH
+    #endif
+  } else {
+    #if ESP_ARDUINO_VERSION_MAJOR >= 3
+      ledcWrite(BUZZER_PIN, 0); // ESP32 Core 3.0+ - TẮT ÂM THANH
+    #else
+      ledcWrite(BUZZER_CHANNEL, 0); // ESP32 Core 2.x - TẮT ÂM THANH
+    #endif
+  }
+}
+
 void controlPWMBuzzer(bool fireDetected, GasLevel gasLevel) {
   static unsigned long lastBuzzerUpdate = 0;
   static bool buzzerState = false;
@@ -278,19 +315,7 @@ void controlPWMBuzzer(bool fireDetected, GasLevel gasLevel) {
   if (fireDetected) {
     if (currentTime - lastBuzzerUpdate >= 150) { // 150ms intervals
       buzzerState = !buzzerState;
-      if (buzzerState) {
-        #if ESP_ARDUINO_VERSION_MAJOR >= 3
-          ledcWrite(BUZZER_PIN, 200); // ESP32 Core 3.0+ syntax - PHÁT ÂM THANH
-        #else
-          ledcWrite(BUZZER_CHANNEL, 200); // ESP32 Core 2.x syntax - PHÁT ÂM THANH
-        #endif
-      } else {
-        #if ESP_ARDUINO_VERSION_MAJOR >= 3
-          ledcWrite(BUZZER_PIN, 0);   // TẮT ÂM THANH
-        #else
-          ledcWrite(BUZZER_CHANNEL, 0);   // TẮT ÂM THANH
-        #endif
-      }
+      playBuzzerTone(200, buzzerState); // High intensity fire alert
       lastBuzzerUpdate = currentTime;
     }
   }
@@ -301,29 +326,13 @@ void controlPWMBuzzer(bool fireDetected, GasLevel gasLevel) {
     
     if (currentTime - lastBuzzerUpdate >= beepInterval) {
       buzzerState = !buzzerState;
-      if (buzzerState) {
-        #if ESP_ARDUINO_VERSION_MAJOR >= 3
-          ledcWrite(BUZZER_PIN, pwmIntensity); // PHÁT ÂM THANH VỚI CƯỜNG ĐỘ KHÁC NHAU
-        #else
-          ledcWrite(BUZZER_CHANNEL, pwmIntensity); // PHÁT ÂM THANH VỚI CƯỜNG ĐỘ KHÁC NHAU
-        #endif
-      } else {
-        #if ESP_ARDUINO_VERSION_MAJOR >= 3
-          ledcWrite(BUZZER_PIN, 0); // TẮT ÂM THANH
-        #else
-          ledcWrite(BUZZER_CHANNEL, 0); // TẮT ÂM THANH
-        #endif
-      }
+      playBuzzerTone(pwmIntensity, buzzerState); // Variable intensity based on gas level
       lastBuzzerUpdate = currentTime;
     }
   }
   // Safe condition: Turn off buzzer
   else {
-    #if ESP_ARDUINO_VERSION_MAJOR >= 3
-      ledcWrite(BUZZER_PIN, 0); // TẮT BUZZER KHI AN TOÀN
-    #else
-      ledcWrite(BUZZER_CHANNEL, 0); // TẮT BUZZER KHI AN TOÀN
-    #endif
+    playBuzzerTone(0, false); // TẮT BUZZER KHI AN TOÀN
     buzzerState = false;
   }
 }
@@ -373,7 +382,7 @@ void displaySensorReadings(const SystemData& data) {
   
   // Alert status
   if (data.fireDetected) {
-    Serial.println("║ 🚨🔥 FIRE EMERGENCY - IMMEDIATE ACTION REQUIRED! 🔥🚨 ║");
+    Serial.println("║ 🚨🔥 FIRE EMERGENCY - ALL LEDS FLASHING! 🔥🚨       ║");
   } else if (data.gasLevel == GAS_DANGER) {
     Serial.println("║ ⚠️🚨  GAS DANGER ALERT - EVACUATE AREA!  🚨⚠️       ║");
   } else if (data.gasLevel == GAS_WARNING) {

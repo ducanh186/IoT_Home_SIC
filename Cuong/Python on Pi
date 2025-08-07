@@ -1,7 +1,7 @@
 import paho.mqtt.client as mqtt
 
 # Cấu hình MQTT broker
-mqtt_server = "192.168.1.100"  # Địa chỉ IP của Raspberry Pi (MQTT broker)
+mqtt_server = "10.189.169.194"  # Địa chỉ IP của Raspberry Pi (MQTT broker)
 mqtt_port = 1883
 mqtt_topic = "thungrac/distance" # Topic để subscribe
 

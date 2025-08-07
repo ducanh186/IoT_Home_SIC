@@ -2,24 +2,24 @@ import paho.mqtt.client as mqtt
 import json
 from datetime import datetime
 
-MQTT_ADDRESS = '192.168.1.3'  # IP Raspberry Pi 5 của bạn
-MQTT_USER = 'pi101'           # user đã tạo trong Mosquitto
-MQTT_PASSWORD = '1234'        # mật khẩu tương ứng
+MQTT_ADDRESS = '10.189.169.194'  # Your Raspberry Pi 5 IP address
+MQTT_USER = 'pi101'           # Username created in Mosquitto
+MQTT_PASSWORD = '1234'        # Corresponding password
 
-# MQTT Topics từ ESP32 NodeMCU - tương thích với cảm biến MQ 2 chân
+# MQTT Topics from ESP32 NodeMCU - compatible with 2-pin MQ sensor
 MQTT_TOPIC_TEMP = 'temperature'
 MQTT_TOPIC_HUMD = 'humidity'
-MQTT_TOPIC_GAS_ANALOG = 'gas_analog'      # Giá trị analog MQ (0-4095)
-MQTT_TOPIC_GAS_DIGITAL = 'gas_digital'    # Trạng thái digital MQ
+MQTT_TOPIC_GAS_ANALOG = 'gas_analog'      # MQ analog value (0-4095)
+MQTT_TOPIC_GAS_DIGITAL = 'gas_digital'    # MQ digital status
 MQTT_TOPIC_GAS_STATUS = 'gas_status'      # SAFE/WARNING/DANGER
 MQTT_TOPIC_FIRE = 'fire_detected'
 
-# Store latest sensor data from ESP32 - cập nhật cho MQ 2 chân
+# Store latest sensor data from ESP32 - updated for 2-pin MQ sensor
 sensor_data = {
     'temperature': None,
     'humidity': None,
-    'gas_analog': None,        # Thêm gas analog
-    'gas_digital': None,       # Thêm gas digital  
+    'gas_analog': None,        # Add gas analog
+    'gas_digital': None,       # Add gas digital  
     'gas_status': None,
     'fire_detected': None,
     'last_update': None
@@ -28,7 +28,7 @@ sensor_data = {
 def on_connect(client, userdata, flags, rc):
     print('🔗 Connected to MQTT broker with result code ' + str(rc))
     
-    # Subscribe to all ESP32 sensor topics - cập nhật cho MQ 2 chân
+    # Subscribe to all ESP32 sensor topics - updated for 2-pin MQ sensor
     topics = [MQTT_TOPIC_TEMP, MQTT_TOPIC_HUMD, MQTT_TOPIC_GAS_ANALOG, 
               MQTT_TOPIC_GAS_DIGITAL, MQTT_TOPIC_GAS_STATUS, MQTT_TOPIC_FIRE]
     
