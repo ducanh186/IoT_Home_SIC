@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏠 Smart Home Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .main-container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+        }
+
+        .room-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .room-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+        }
+
+        .room-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 1.5rem;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .node-section {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            background: rgba(0, 0, 0, 0.03);
+            border-radius: 15px;
+            border-left: 4px solid #3498db;
+        }
+
+        .node-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #34495e;
+        }
+
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .sensor-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .sensor-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .sensor-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .sensor-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 0.3rem;
+        }
+
+        .sensor-label {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        .status-safe { background-color: #27ae60; }
+        .status-warning { background-color: #f39c12; }
+        .status-danger { background-color: #e74c3c; }
+        .status-online { background-color: #27ae60; }
+        .status-offline { background-color: #95a5a6; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 0.8rem 1rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: white;
+        }
+
+        .btn-open {
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
+        }
+
+        .btn-close {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+        }
+
+        .btn-toggle {
+            background: linear-gradient(45deg, #3498db, #2980b9);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .alerts-section {
+            grid-column: 1 / -1;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .alert-item {
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 10px;
+            border-left: 4px solid;
+            background: rgba(0, 0, 0, 0.02);
+        }
+
+        .alert-critical { border-left-color: #e74c3c; }
+        .alert-high { border-left-color: #f39c12; }
+        .alert-medium { border-left-color: #f1c40f; }
+
+        .chart-container {
+            height: 300px;
+            margin-top: 1rem;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            color: white;
+            font-weight: 600;
+            z-index: 1000;
+        }
+
+        .connected {
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
+        }
+
+        .disconnected {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                grid-template-columns: 1fr;
+                margin: 1rem auto;
+                padding: 0 0.5rem;
+            }
+
+            .room-card {
+                padding: 1.5rem;
+            }
+
+            .sensor-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .last-updated {
+            font-size: 0.8rem;
+            color: #7f8c8d;
+            text-align: center;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">🔄 Connecting...</div>
+
+    <div class="header">
+        <h1>🏠 Smart Home Dashboard</h1>
+    </div>
+
+    <div class="main-container">
+        <!-- Bedroom Section -->
+        <div class="room-card">
+            <div class="room-title">
+                🛏️ Bedroom
+                <span class="status-indicator status-online" id="bedroom-status"></span>
+            </div>
+
+            <!-- Bedroom Node 1 - Environmental Monitor -->
+            <div class="node-section">
+                <div class="node-title">📊 Environmental Monitor (Node 1)</div>
+                <div class="sensor-grid">
+                    <div class="sensor-card">
+                        <div class="sensor-icon">🌡️</div>
+                        <div class="sensor-value" id="bedroom-temp">--°C</div>
+                        <div class="sensor-label">Temperature</div>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">💧</div>
+                        <div class="sensor-value" id="bedroom-humidity">--%</div>
+                        <div class="sensor-label">Humidity</div>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">💨</div>
+                        <div class="sensor-value" id="bedroom-gas">SAFE</div>
+                        <div class="sensor-label">Gas Level</div>
+                        <span class="status-indicator status-safe" id="bedroom-gas-indicator"></span>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">🔥</div>
+                        <div class="sensor-value" id="bedroom-fire">No Fire</div>
+                        <div class="sensor-label">Fire Detection</div>
+                        <span class="status-indicator status-safe" id="bedroom-fire-indicator"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bedroom Node 2 - Smart Door -->
+            <div class="node-section">
+                <div class="node-title">🚪 Smart Door (Node 2)</div>
+                <div class="sensor-grid">
+                    <div class="sensor-card">
+                        <div class="sensor-icon">🚪</div>
+                        <div class="sensor-value" id="bedroom-door">Closed</div>
+                        <div class="sensor-label">Door Status</div>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">👤</div>
+                        <div class="sensor-value" id="bedroom-presence">No Person</div>
+                        <div class="sensor-label">Presence</div>
+                        <span class="status-indicator status-offline" id="bedroom-presence-indicator"></span>
+                    </div>
+                </div>
+                <div class="control-buttons">
+                    <button class="btn btn-open" onclick="controlDoor('bedroom', 'open')">Open Door</button>
+                    <button class="btn btn-close" onclick="controlDoor('bedroom', 'close')">Close Door</button>
+                    <button class="btn btn-toggle" onclick="controlDoor('bedroom', 'toggle')">Toggle</button>
+                </div>
+            </div>
+            <div class="last-updated" id="bedroom-updated">Last updated: --</div>
+        </div>
+
+        <!-- Living Room Section -->
+        <div class="room-card">
+            <div class="room-title">
+                🛋️ Living Room
+                <span class="status-indicator status-online" id="livingroom-status"></span>
+            </div>
+
+            <!-- Living Room Node 1 - Environmental Monitor -->
+            <div class="node-section">
+                <div class="node-title">📊 Environmental Monitor (Node 1)</div>
+                <div class="sensor-grid">
+                    <div class="sensor-card">
+                        <div class="sensor-icon">🌡️</div>
+                        <div class="sensor-value" id="livingroom-temp">--°C</div>
+                        <div class="sensor-label">Temperature</div>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">💧</div>
+                        <div class="sensor-value" id="livingroom-humidity">--%</div>
+                        <div class="sensor-label">Humidity</div>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">💨</div>
+                        <div class="sensor-value" id="livingroom-gas">SAFE</div>
+                        <div class="sensor-label">Gas Level</div>
+                        <span class="status-indicator status-safe" id="livingroom-gas-indicator"></span>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">🔥</div>
+                        <div class="sensor-value" id="livingroom-fire">No Fire</div>
+                        <div class="sensor-label">Fire Detection</div>
+                        <span class="status-indicator status-safe" id="livingroom-fire-indicator"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Living Room Node 2 - Smart Door -->
+            <div class="node-section">
+                <div class="node-title">🚪 Smart Door (Node 2)</div>
+                <div class="sensor-grid">
+                    <div class="sensor-card">
+                        <div class="sensor-icon">🚪</div>
+                        <div class="sensor-value" id="livingroom-door">Closed</div>
+                        <div class="sensor-label">Door Status</div>
+                    </div>
+                    <div class="sensor-card">
+                        <div class="sensor-icon">👤</div>
+                        <div class="sensor-value" id="livingroom-presence">No Person</div>
+                        <div class="sensor-label">Presence</div>
+                        <span class="status-indicator status-offline" id="livingroom-presence-indicator"></span>
+                    </div>
+                </div>
+                <div class="control-buttons">
+                    <button class="btn btn-open" onclick="controlDoor('livingroom', 'open')">Open Door</button>
+                    <button class="btn btn-close" onclick="controlDoor('livingroom', 'close')">Close Door</button>
+                    <button class="btn btn-toggle" onclick="controlDoor('livingroom', 'toggle')">Toggle</button>
+                </div>
+            </div>
+            <div class="last-updated" id="livingroom-updated">Last updated: --</div>
+        </div>
+
+        <!-- Alerts Section -->
+        <div class="alerts-section">
+            <h2>🚨 System Alerts</h2>
+            <div id="alerts-container">
+                <div class="alert-item">
+                    <strong>ℹ️ System Ready</strong>
+                    <p>Smart home system is online and monitoring all sensors.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+        let lastUpdateTime = {};
+
+        // Connection status handling
+        const connectionStatus = document.getElementById('connectionStatus');
+
+        socket.on('connect', function() {
+            connectionStatus.textContent = '🟢 Connected';
+            connectionStatus.className = 'connection-status connected';
+            console.log('Connected to server');
+        });
+
+        socket.on('disconnect', function() {
+            connectionStatus.textContent = '🔴 Disconnected';
+            connectionStatus.className = 'connection-status disconnected';
+            console.log('Disconnected from server');
+        });
+
+        // Handle sensor updates
+        socket.on('sensor_update', function(data) {
+            updateSensorDisplay(data);
+            lastUpdateTime[data.room] = new Date();
+            updateLastUpdatedTime(data.room);
+        });
+
+        socket.on('current_data', function(data) {
+            console.log('Received current data:', data);
+            updateAllSensors(data);
+        });
+
+        function updateSensorDisplay(data) {
+            const room = data.room;
+            const node = data.node;
+            const device = data.device;
+            const attribute = data.attribute;
+            const value = data.value;
+
+            // Update temperature
+            if (device === 'temperature_sensor' && attribute === 'value') {
+                document.getElementById(`${room}-temp`).textContent = `${parseFloat(value).toFixed(1)}°C`;
+            }
+            
+            // Update humidity
+            else if (device === 'humidity_sensor' && attribute === 'value') {
+                document.getElementById(`${room}-humidity`).textContent = `${parseFloat(value).toFixed(1)}%`;
+            }
+            
+            // Update gas sensor
+            else if (device === 'gas_sensor' && attribute === 'status') {
+                const gasElement = document.getElementById(`${room}-gas`);
+                const gasIndicator = document.getElementById(`${room}-gas-indicator`);
+                
+                gasElement.textContent = value;
+                
+                gasIndicator.className = 'status-indicator';
+                if (value === 'SAFE') {
+                    gasIndicator.classList.add('status-safe');
+                } else if (value === 'WARNING') {
+                    gasIndicator.classList.add('status-warning');
+                } else if (value === 'DANGER') {
+                    gasIndicator.classList.add('status-danger');
+                }
+            }
+            
+            // Update fire sensor
+            else if (device === 'flame_sensor' && attribute === 'alert') {
+                const fireElement = document.getElementById(`${room}-fire`);
+                const fireIndicator = document.getElementById(`${room}-fire-indicator`);
+                
+                if (value === 'FIRE_DETECTED') {
+                    fireElement.textContent = 'FIRE!';
+                    fireIndicator.className = 'status-indicator status-danger';
+                } else {
+                    fireElement.textContent = 'No Fire';
+                    fireIndicator.className = 'status-indicator status-safe';
+                }
+            }
+            
+            // Update door status
+            else if (device === 'door' && attribute === 'status') {
+                try {
+                    const doorData = JSON.parse(value);
+                    document.getElementById(`${room}-door`).textContent = 
+                        doorData.state.charAt(0).toUpperCase() + doorData.state.slice(1);
+                    
+                    const presenceElement = document.getElementById(`${room}-presence`);
+                    const presenceIndicator = document.getElementById(`${room}-presence-indicator`);
+                    
+                    if (doorData.presence) {
+                        presenceElement.textContent = 'Person Detected';
+                        presenceIndicator.className = 'status-indicator status-online';
+                    } else {
+                        presenceElement.textContent = 'No Person';
+                        presenceIndicator.className = 'status-indicator status-offline';
+                    }
+                } catch (e) {
+                    console.error('Error parsing door data:', e);
+                }
+            }
+        }
+
+        function updateAllSensors(data) {
+            for (const room in data) {
+                for (const node in data[room]) {
+                    const nodeData = data[room][node];
+                    
+                    // Update environmental data (node1)
+                    if (node === 'node1') {
+                        if (nodeData.temperature !== undefined) {
+                            document.getElementById(`${room}-temp`).textContent = `${nodeData.temperature.toFixed(1)}°C`;
+                        }
+                        if (nodeData.humidity !== undefined) {
+                            document.getElementById(`${room}-humidity`).textContent = `${nodeData.humidity.toFixed(1)}%`;
+                        }
+                        if (nodeData.gas_status !== undefined) {
+                            const gasElement = document.getElementById(`${room}-gas`);
+                            const gasIndicator = document.getElementById(`${room}-gas-indicator`);
+                            
+                            gasElement.textContent = nodeData.gas_status;
+                            gasIndicator.className = 'status-indicator';
+                            
+                            if (nodeData.gas_status === 'SAFE') {
+                                gasIndicator.classList.add('status-safe');
+                            } else if (nodeData.gas_status === 'WARNING') {
+                                gasIndicator.classList.add('status-warning');
+                            } else if (nodeData.gas_status === 'DANGER') {
+                                gasIndicator.classList.add('status-danger');
+                            }
+                        }
+                        if (nodeData.fire !== undefined) {
+                            const fireElement = document.getElementById(`${room}-fire`);
+                            const fireIndicator = document.getElementById(`${room}-fire-indicator`);
+                            
+                            if (nodeData.fire) {
+                                fireElement.textContent = 'FIRE!';
+                                fireIndicator.className = 'status-indicator status-danger';
+                            } else {
+                                fireElement.textContent = 'No Fire';
+                                fireIndicator.className = 'status-indicator status-safe';
+                            }
+                        }
+                    }
+                    
+                    // Update door data (node2)
+                    else if (node === 'node2') {
+                        if (nodeData.door_state !== undefined) {
+                            document.getElementById(`${room}-door`).textContent = 
+                                nodeData.door_state.charAt(0).toUpperCase() + nodeData.door_state.slice(1);
+                        }
+                        if (nodeData.presence !== undefined) {
+                            const presenceElement = document.getElementById(`${room}-presence`);
+                            const presenceIndicator = document.getElementById(`${room}-presence-indicator`);
+                            
+                            if (nodeData.presence) {
+                                presenceElement.textContent = 'Person Detected';
+                                presenceIndicator.className = 'status-indicator status-online';
+                            } else {
+                                presenceElement.textContent = 'No Person';
+                                presenceIndicator.className = 'status-indicator status-offline';
+                            }
+                        }
+                    }
+                }
+                
+                lastUpdateTime[room] = new Date();
+                updateLastUpdatedTime(room);
+            }
+        }
+
+        function updateLastUpdatedTime(room) {
+            const element = document.getElementById(`${room}-updated`);
+            if (lastUpdateTime[room]) {
+                element.textContent = `Last updated: ${lastUpdateTime[room].toLocaleTimeString()}`;
+            }
+        }
+
+        function controlDoor(room, action) {
+            socket.emit('request_door_control', {
+                room: room,
+                action: action
+            });
+            
+            // Show visual feedback
+            const buttons = document.querySelectorAll(`[onclick*="${room}"]`);
+            buttons.forEach(btn => {
+                btn.style.opacity = '0.6';
+                setTimeout(() => btn.style.opacity = '1', 1000);
+            });
+        }
+
+        socket.on('door_command_sent', function(data) {
+            console.log(`Door command sent: ${data.action} for ${data.room}`);
+        });
+
+        // Load alerts periodically
+        function loadAlerts() {
+            fetch('/api/alerts')
+                .then(response => response.json())
+                .then(alerts => {
+                    const container = document.getElementById('alerts-container');
+                    
+                    if (alerts.length === 0) {
+                        container.innerHTML = `
+                            <div class="alert-item">
+                                <strong>✅ No Active Alerts</strong>
+                                <p>All systems are operating normally.</p>
+                            </div>
+                        `;
+                    } else {
+                        container.innerHTML = alerts.map(alert => `
+                            <div class="alert-item alert-${alert.severity.toLowerCase()}">
+                                <strong>${getAlertIcon(alert.severity)} ${alert.alert_type}</strong>
+                                <p>${alert.message}</p>
+                                <small>Room: ${alert.room} | Node: ${alert.node} | ${new Date(alert.timestamp).toLocaleString()}</small>
+                            </div>
+                        `).join('');
+                    }
+                })
+                .catch(error => console.error('Error loading alerts:', error));
+        }
+
+        function getAlertIcon(severity) {
+            switch (severity.toLowerCase()) {
+                case 'critical': return '🚨';
+                case 'high': return '⚠️';
+                case 'medium': return '🟡';
+                default: return 'ℹ️';
+            }
+        }
+
+        // Update alerts every 30 seconds
+        setInterval(loadAlerts, 30000);
+        loadAlerts(); // Load initially
+
+        // Update "last updated" times every second
+        setInterval(() => {
+            for (const room in lastUpdateTime) {
+                updateLastUpdatedTime(room);
+            }
+        }, 1000);
+
+        console.log('Smart Home Dashboard initialized');
+    </script>
+</body>
+</html>
